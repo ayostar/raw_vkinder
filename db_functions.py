@@ -84,12 +84,13 @@ def add_photos(link_photo, count_likes, d_user_id):
         return False
 
 
-def add_to_black_list(d_user_vk_id, first_name, last_name, h_user_id):
+def add_to_black_list(d_user_vk_id, first_name, last_name, vk_link, h_user_id):
     try:
         d_user = BlackList(
             d_user_vk_id = d_user_vk_id,
             first_name = first_name,
             last_name = last_name,
+            vk_link = vk_link,
             h_user_id = h_user_id
         )
         session.add(d_user)
