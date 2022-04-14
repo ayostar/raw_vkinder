@@ -1,3 +1,5 @@
+from tkinter.messagebox import NO
+from urllib import request
 import vk_api
 import re
 from random import randrange
@@ -7,7 +9,6 @@ from db_functions import DB
 from vk_functions import VK
 from messages import *
 
-
 vk = VK()
 db = DB()
 
@@ -15,10 +16,10 @@ db = DB()
 class Bot:
     def __init__(self, group_token):
         self.token = group_token
-        self.vk_session = vk_api.VkApi(token=group_token)
+        self.vk_session = vk_api.VkApi(token = group_token)
         self.longpoll = VkLongPoll(self.vk_session)
 
-    def write_msg(self, user_id, message, attachment = None):
+    def write_msg(self, user_id, message, attachment=None):
         params = {
             'user_id': user_id,
             'message': message,
@@ -35,42 +36,67 @@ class Bot:
                     listen_user_id = event.user_id
                     return listen_message_text, listen_user_id
 
+    def process_search_params(self, listen_user_id):
+        user_data = vk.get_horney_user_info(listen_user_id)
+        user_country = user_data.get('country')
+        user_city = user_data.get('city')
+        user_sex = user_data.get('sex')
+        user_bdate = user_data.get('bdate')
+        if user_country is None:
+            self.write_msg(listen_user_id, 'В вашем профиле не указана страна. Введите страну на английском языке')
+            country_id = self.bot_query_country()
+        else:
+            country_id = user_country.get('id')
+        if user_city is None:
+            self.write_msg(listen_user_id, 'Введите город на русском языке')
+            city_id = self.bot_query_city(country_id)
+        else:
+            city_id = user_city.get('id')
+        if user_sex is None:
+            self.write_msg(listen_user_id, SEX)
+            sex = self.bot_query_sex()
+        else:
+            sex = 1 if user_sex == 2 else 2
+        if user_bdate:
+            age = vk.get_user_age(user_bdate)
+            age_from, age_to = age - 3, age + 3
+        else:
+            self.write_msg(listen_user_id, AGE)
+            age_from, age_to = self.bot_query_age()
+        search_params = {
+            'h_user_vk_id': listen_user_id,
+            'first_name': user_data.get('first_name', ''),
+            'last_name': user_data.get('last_name', ''),
+            'country': country_id,
+            'city': city_id,
+            'sex': sex,
+            'age_from': age_from,
+            'age_to': age_to
+        }
+        return search_params
+
     def bot_start(self, listen_user_id):
-        h_user_first_name, h_user_last_name, h_user_sex = vk.get_horney_user_info(listen_user_id)
-        try:
-            db_h_user_id = db.check_db_h_user(listen_user_id)
+        user_data = self.process_search_params(listen_user_id)  ## собираем данные о клиенте
+        db_h_user_id = db.check_db_h_user(listen_user_id)
 
-            if db_h_user_id is not None:
-                self.bot_greeting(listen_user_id, h_user_first_name, h_user_last_name, h_user_sex)
-            else:
-                db.reg_new_user(listen_user_id, h_user_first_name, h_user_last_name)
-                self.bot_greeting(listen_user_id, h_user_first_name, h_user_last_name, h_user_sex)
-        except:
-            print('Что-то не так с базой данных')
-
-    def bot_greeting(self, listen_user_id, h_user_first_name, h_user_last_name, h_user_sex):
-        h_user_city_id, h_user_city_title = vk.get_user_city(listen_user_id)
-        h_user_age = vk.get_user_age(listen_user_id)
-
-        self.write_msg(listen_user_id, f'Привет {h_user_first_name} {h_user_last_name}! Я бот - Vkinder\n'
-                                       f'Я помогу тебе подобрать пару!\n'
-                                       f'Согласно моим данным ты {h_user_sex}.\n')
-        if h_user_city_title is not None:
-            self.write_msg(listen_user_id, f'Ты из города {h_user_city_title}.\n')
+        if db_h_user_id is not None:
+            self.bot_greeting(listen_user_id, user_data)
         else:
-            self.write_msg(listen_user_id, f'В твоем профиле не указан город.\n')
+            db.reg_new_user(user_data)
+            self.bot_greeting(listen_user_id, user_data)
+        return user_data
 
-        if h_user_age is not None:
-            self.write_msg(listen_user_id, f'Тебе {h_user_age}\n')
-        else:
-            self.write_msg(listen_user_id, f'В твоем профиле не указан твой возраст.\n')
+    def bot_greeting(self, listen_user_id, user_data):
+        self.write_msg(listen_user_id, f'Привет {user_data["first_name"]} {user_data["last_name"]}! Я бот - Vkinder\n'
+                                       f'Я помогу тебе подобрать пару!\n')
 
     def bot_main_menu(self, listen_user_id):
         self.write_msg(listen_user_id, f'Для нового поиска введи "Vkinder"\n'
                                        f'Для просмотра избранного введи "Favorites"\n'
                                        f'Для просмотра черного списка введи "Blacklist"\n')
 
-    def bot_query_sex(self, listen_user_id, listen_message_text):
+    def bot_query_sex(self):
+        listen_message_text, listen_user_id = self.loop_bot()
         re_pattern_1 = re.search(r'((?:жен|дев|баб)+)', listen_message_text)
         re_pattern_2 = re.search(r'((?:муж|пар|пац|мальч)+)', listen_message_text)
 
@@ -87,7 +113,8 @@ class Bot:
 
         return d_user_sex
 
-    def bot_query_age(self, listen_user_id, listen_message_text):
+    def bot_query_age(self):
+        listen_message_text, listen_user_id = self.loop_bot()
         re_pattern = re.findall(r'(\d{2})', listen_message_text)
         if len(re_pattern) != 2:
             self.write_msg(listen_user_id, f'Данные "{listen_message_text}" не соответствуют критериям поиска.\n'
@@ -100,23 +127,20 @@ class Bot:
             d_user_age_to = int(re_pattern[1])
             return d_user_age_from, d_user_age_to
 
-    def bot_query_country(self, listen_message_text):
-        d_user_country_name = listen_message_text.title()
-        d_user_country_id = vk.get_country_id(d_user_country_name)
+    def bot_query_country(self):
+        request_country, listen_user_id = self.loop_bot()
+        d_user_country_id = vk.get_country_id(request_country)
         if d_user_country_id:
             return d_user_country_id
         else:
             return None
 
-    def bot_query_city(self, listen_user_id, listen_message_text, d_user_country_id):
-        d_user_city_title = listen_message_text.title()
-        d_user_city_id = vk.get_cities_from_vk_db(d_user_city_title, d_user_country_id)
-
-        if d_user_city_id is not None:
+    def bot_query_city(self, d_user_country_id):
+        city_name, listen_user_id = self.loop_bot()
+        d_user_city_id = vk.get_cities_from_vk_db(city_name, d_user_country_id)
+        if d_user_city_id:
             return d_user_city_id
         else:
-            self.write_msg(listen_user_id, f'Пользователей из города {d_user_city_title} увы нет.\n'
-                                           f'Попробуй снова?')
             return None
 
     def bot_candidates(self, listen_user_id, d_user_lists):
@@ -125,6 +149,7 @@ class Bot:
         self.write_msg(listen_user_id, f'Количество найденных пользователей: {d_users_count}')
         if d_users_count != 0:
             for d_user in d_user_lists:
+                db.add_to_passed_dates(d_user[0], h_user_db_id)
                 self.write_msg(listen_user_id, f'Найден подходящий вариант:\n'
                                                f' Имя {d_user[1]}, Фамилия {d_user[2]}\n'
                                                f'Ссылка на страницу {d_user[4]}')
@@ -155,6 +180,11 @@ class Bot:
                     break
                 else:
                     continue
+
+    def search_users(self, listen_user_id):
+        user_data = self.bot_start(listen_user_id)  ## собираем данные о клиенте
+        users_list = vk.search_users(user_data)
+        self.bot_candidates(listen_user_id, users_list)
 
     def check_all_favorites(self, listen_user_id):
         found_favorite_list_users = db.check_db_favorites(listen_user_id)
@@ -215,14 +245,8 @@ class Bot:
                     continue
 
     def bot(self):
-        longpoll = VkLongPoll(self.vk_session)
-        last_event = None
-        d_user_sex = None
-        d_user_age_from = None
-        d_user_age_to = None
-        d_user_country_id = None
 
-        for event in longpoll.listen():
+        for event in self.longpoll.listen():
             if event.type == VkEventType.MESSAGE_NEW:
 
                 if event.to_me:
@@ -230,39 +254,8 @@ class Bot:
                     listen_message_text = event.text.lower()
                     listen_user_id = event.user_id
 
-                    if listen_message_text == 'Vkinder'.lower() and last_event is None:
-                        self.bot_start(listen_user_id)
-                        self.write_msg(listen_user_id, SEX)
-                        last_event = 'wait for sex'
-
-                    elif last_event == 'wait for sex':
-                        d_user_sex = self.bot_query_sex(listen_user_id, listen_message_text)
-                        self.write_msg(listen_user_id, AGE)
-                        last_event = 'wait for age'
-
-                    elif last_event == 'wait for age':
-                        d_user_age_from, d_user_age_to = self.bot_query_age(listen_user_id, listen_message_text)
-                        if d_user_age_from and d_user_age_to:
-                            self.write_msg(listen_user_id, COUNTRY)
-                            last_event = 'wait for country id'
-                        else:
-                            last_event = 'wait for age'
-
-                    elif last_event == 'wait for country id':
-                        d_user_country_id = self.bot_query_country(listen_message_text)
-                        self.write_msg(listen_user_id, CITY)
-                        last_event = 'wait for city id'
-
-                    elif last_event == 'wait for city id':
-                        d_user_city_id = self.bot_query_city(listen_user_id, listen_message_text, d_user_country_id)
-                        if d_user_city_id is not None:
-                            d_user_lists = vk.search_users(d_user_sex, d_user_age_from, d_user_age_to, d_user_city_id)
-                            self.loop_bot()
-                            self.bot_candidates(listen_user_id, d_user_lists)
-                            self.bot_main_menu(listen_user_id)
-                        else:
-                            self.write_msg(listen_user_id, f'К сожалению пользователей из такого города нет')
-                            self.bot_main_menu(listen_user_id)
+                    if listen_message_text == 'Vkinder'.lower():
+                        self.search_users(listen_user_id)
 
                     elif listen_message_text == 'Favorites'.lower():
                         self.loop_bot()
@@ -271,7 +264,6 @@ class Bot:
                     elif listen_message_text == 'Blacklist'.lower():
                         self.loop_bot()
                         self.check_all_black_list(listen_user_id)
-
                     else:
                         self.bot_main_menu(listen_user_id)
 
@@ -279,5 +271,6 @@ class Bot:
 if __name__ == '__main__':
     vkinder = Bot(group_token)
     vkinder.bot()
+
 
 

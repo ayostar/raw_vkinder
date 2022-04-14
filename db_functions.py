@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError, InvalidRequestError
 from db_config import db_type, db_user, db_password, db_host, db_name
 
+
 Base = declarative_base()
 engine_db = f'{db_type}://{db_user}:{db_password}@{db_host}/{db_name}'
 engine = create_engine(engine_db, client_encoding = 'utf8')
@@ -17,6 +18,11 @@ class HornyUser(Base):
     h_user_vk_id = Column(Integer, unique=True)
     first_name = Column(String)
     last_name = Column(String)
+    age_from = Column(Integer, nullable=True)
+    age_to = Column(Integer, nullable=True)
+    country = Column(Integer, nullable=True)
+    city = Column(Integer, nullable=True)
+    sex = Column(Integer, nullable=True)
 
 
 class DatingUser(Base):
@@ -47,17 +53,24 @@ class BlackList(Base):
     h_user_id = Column(Integer, ForeignKey('horny_user.id', ondelete='CASCADE'))
 
 
+class PassedDates(Base):
+    __tablename__ = 'passed_dates'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    pd_vk_id = Column(Integer, unique=True)
+    h_user_id = Column(Integer, ForeignKey('horny_user.id', ondelete='CASCADE'))
+
+
 class DB:
     def __init__(self):
         pass
 
-    def reg_new_user(self, horny_user_id, first_name, last_name):
+    def reg_new_user(self, user_data):
         try:
-            h_user = HornyUser(h_user_vk_id = horny_user_id, first_name = first_name, last_name = last_name)
+            h_user = HornyUser(**user_data)
             session.add(h_user)
             session.commit()
             return True
-        except (IntegrityError, InvalidRequestError):
+        except (IntegrityError, InvalidRequestError) as e:
             return False
 
 
@@ -103,6 +116,19 @@ class DB:
             return False
 
 
+    def add_to_passed_dates(self, d_user_vk_id, h_user_id):
+        try:
+            passed_date = PassedDates(
+                pd_vk_id = d_user_vk_id,
+                h_user_id = h_user_id
+            )
+            session.add(passed_date)
+            session.commit()
+            return True
+        except (IntegrityError, InvalidRequestError):
+            return False
+
+
     def delete_db_blacklist(self, vk_id):
         current_user = session.query(BlackList).filter_by(d_user_vk_id = vk_id).first()
         session.delete(current_user)
@@ -117,7 +143,7 @@ class DB:
 
     def check_db_h_user(self, vk_id):
         h_user_db_query = session.query(HornyUser).filter_by(h_user_vk_id = vk_id).first()
-        h_user_db_id = h_user_db_query.id
+        h_user_db_id = h_user_db_query.id if h_user_db_query else None
         return h_user_db_id
 
 
@@ -142,6 +168,15 @@ class DB:
         found_favorite_list_users = session.query(DatingUser).filter_by(h_user_id = current_user.id).all()
         return found_favorite_list_users
 
+    def check_db_passed_dates(self, vk_id):
+        db_passed_date_id = session.query(PassedDates).filter_by(pd_vk_id = vk_id).first()
+        return db_passed_date_id
+
+
+    # def check_db_passed_dates(self, vk_id):
+    #     current_user = session.query(HornyUser).filter_by(h_user_vk_id = vk_id).first()
+    #     found_passed_dates = session.query(PassedDates).filter_by(h_user_id = current_user.id).all()
+    #     return found_passed_dates
 
 if __name__ == '__main__':
     Base.metadata.create_all(engine)
